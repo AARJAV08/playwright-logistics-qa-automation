@@ -1,0 +1,28 @@
+{
+  "name": "playwright-logistics-qa-automation",
+  "version": "1.0.0",
+  "description": "UI and API test automation for a shipment management (logistics) web application, built with Playwright and TypeScript.",
+  "private": true,
+  "scripts": {
+    "start:app": "node app/server.js",
+    "test": "playwright test",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:regression": "playwright test --grep @regression",
+    "test:api": "playwright test --project=api",
+    "test:chromium": "playwright test --project=chromium",
+    "test:firefox": "playwright test --project=firefox",
+    "test:webkit": "playwright test --project=webkit",
+    "test:headed": "playwright test --project=chromium --headed",
+    "test:debug": "playwright test --project=chromium --debug",
+    "test:ui-mode": "playwright test --ui",
+    "report": "playwright show-report",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["playwright", "typescript", "qa", "logistics", "test-automation", "api-testing", "page-object-model"],
+  "license": "MIT",
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  }
+}

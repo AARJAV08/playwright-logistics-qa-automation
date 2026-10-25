@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LogiTrack - Shipment Management</title>
+  <style>
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; font-family: system-ui, Arial, sans-serif; background: #f4f6f9; color: #1d2733; }
+    header { background: #12355b; color: #fff; padding: 16px 24px; }
+    header h1 { margin: 0; font-size: 22px; }
+    main { max-width: 1100px; margin: 0 auto; padding: 20px; display: grid; gap: 20px; }
+    section { background: #fff; border-radius: 8px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .stat { background: #eef3f9; border-radius: 6px; padding: 12px; }
+    .stat span { display: block; font-size: 26px; font-weight: 700; }
+    .toolbar { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+    input, select, button { font: inherit; padding: 7px 10px; border: 1px solid #b8c2cf; border-radius: 6px; }
+    button { background: #12355b; color: #fff; border: none; cursor: pointer; }
+    button.secondary { background: #6b7a8c; }
+    button.danger { background: #b3261e; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e3e8ef; vertical-align: middle; }
+    .badge { padding: 2px 8px; border-radius: 12px; background: #dde6f1; font-size: 12px; font-weight: 600; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+    label { display: grid; gap: 4px; font-size: 13px; }
+    .error { background: #fdecea; color: #8a1c14; padding: 8px 10px; border-radius: 6px; margin-top: 10px; }
+    .toast { position: fixed; right: 16px; bottom: 16px; padding: 12px 16px; border-radius: 6px; color: #fff; background: #2e7d32; }
+    .toast.error { background: #b3261e; }
+    ol.timeline { margin: 10px 0 0; padding-left: 20px; }
+  </style>
+</head>
+<body>
+  <header><h1>LogiTrack</h1></header>
+  <main>
+    <section aria-label="Summary">
+      <div class="stats">
+        <div class="stat">Total shipments<span data-testid="stat-total">0</span></div>
+        <div class="stat">Active shipments<span data-testid="stat-active">0</span></div>
+        <div class="stat">Delivered<span data-testid="stat-delivered">0</span></div>
+      </div>
+    </section>
+
+    <section aria-label="Shipments">
+      <h2>Shipments</h2>
+      <div class="toolbar">
+        <select data-testid="status-filter" aria-label="Filter by status">
+          <option value="">All statuses</option>
+          <option>Created</option>
+          <option>Dispatched</option>
+          <option>In Transit</option>
+          <option>Out for Delivery</option>
+          <option>Delivered</option>
+          <option>Cancelled</option>
+        </select>
+        <input data-testid="search-input" type="search" placeholder="Search by ID, customer or city" aria-label="Search shipments" />
+      </div>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Customer</th><th>Route</th><th>Weight</th><th>Status</th><th>Driver</th><th>Actions</th></tr>
+        </thead>
+        <tbody data-testid="shipment-table"></tbody>
+      </table>
+      <p data-testid="empty-state" hidden>No shipments found</p>
+    </section>
+
+    <section aria-label="Create shipment">
+      <h2>Create shipment</h2>
+      <div class="form-grid">
+        <label>Customer <input data-testid="input-customer" /></label>
+        <label>Origin <input data-testid="input-origin" /></label>
+        <label>Destination <input data-testid="input-destination" /></label>
+        <label>Weight (kg) <input data-testid="input-weight" inputmode="decimal" /></label>
+        <label>Priority
+          <select data-testid="select-priority"><option>Normal</option><option>Express</option></select>
+        </label>
+      </div>
+      <p><button data-testid="submit-shipment">Create shipment</button></p>
+      <div class="error" data-testid="form-error" hidden></div>
+    </section>
+
+    <section aria-label="Track shipment">
+      <h2>Track shipment</h2>
+      <div class="toolbar">
+        <input data-testid="track-input" placeholder="Enter tracking number e.g. SHP-1003" aria-label="Tracking number" />
+        <button data-testid="track-btn">Track</button>
+      </div>
+      <div class="error" data-testid="track-error" hidden></div>
+      <div data-testid="track-result" hidden>
+        <p><strong data-testid="track-id"></strong> <span class="badge" data-testid="track-status"></span></p>
+        <p data-testid="track-route"></p>
+        <ol class="timeline" data-testid="track-timeline"></ol>
+      </div>
+    </section>
+  </main>
+  <div class="toast" data-testid="toast" role="status" hidden></div>
+
+  <script>
+    const NEXT_LABEL = {
+      'Created': 'Dispatch',
+      'Dispatched': 'Mark In Transit',
+      'In Transit': 'Out for Delivery',
+      'Out for Delivery': 'Mark Delivered',
+    };
+    const NEXT_STATUS = {
+      'Created': 'Dispatched',
+      'Dispatched': 'In Transit',
+      'In Transit': 'Out for Delivery',
+      'Out for Delivery': 'Delivered',
+    };
+    let drivers = [];
+    const $ = (id) => document.querySelector(`[data-testid="${id}"]`);
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    async function api(url, options = {}) {
+      const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options });
+      const body = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, body };
+    }
+
+    function toast(message, type = 'success') {
+      const el = $('toast');
+      el.textContent = message;
+      el.className = `toast ${type === 'error' ? 'error' : ''}`;
+      el.hidden = false;
+    }
+
+    function driverName(id) {
+      const d = drivers.find((x) => x.id === id);
+      return d ? d.name : 'Unassigned';
+    }
+
+    function renderRows(list) {
+      const tbody = $('shipment-table');
+      $('empty-state').hidden = list.length > 0;
+      tbody.innerHTML = list.map((s) => {
+        const canAssign = s.status === 'Created' || s.status === 'Dispatched';
+        const canCancel = canAssign;
+        const next = NEXT_LABEL[s.status];
+        const actions = [];
+        if (canAssign) {
+          actions.push(`<select data-testid="driver-select" aria-label="Driver for ${esc(s.id)}"><option value="">Select driver</option>${drivers.map((d) => `<option value="${d.id}">${esc(d.name)}</option>`).join('')}</select>`);
+          actions.push(`<button class="secondary" data-testid="assign-btn" data-action="assign" data-id="${esc(s.id)}">Assign</button>`);
+        }
+        if (next) actions.push(`<button data-testid="advance-btn" data-action="advance" data-id="${esc(s.id)}" data-next="${NEXT_STATUS[s.status]}">${next}</button>`);
+        if (canCancel) actions.push(`<button class="danger" data-testid="cancel-btn" data-action="cancel" data-id="${esc(s.id)}">Cancel</button>`);
+        return `<tr data-testid="shipment-row" data-id="${esc(s.id)}">
+          <td data-testid="shipment-id">${esc(s.id)}</td>
+          <td data-testid="shipment-customer">${esc(s.customer)}</td>
+          <td data-testid="shipment-route">${esc(s.origin)} &rarr; ${esc(s.destination)}</td>
+          <td data-testid="shipment-weight">${esc(s.weightKg)} kg</td>
+          <td><span class="badge" data-testid="shipment-status">${esc(s.status)}</span></td>
+          <td data-testid="shipment-driver">${esc(driverName(s.driverId))}</td>
+          <td><div class="actions">${actions.length ? actions.join('') : '<span data-testid="no-actions">-</span>'}</div></td>
+        </tr>`;
+      }).join('');
+    }
+
+    async function loadShipments() {
+      const params = new URLSearchParams();
+      const status = $('status-filter').value;
+      const q = $('search-input').value;
+      if (status) params.set('status', status);
+      if (q) params.set('q', q);
+      const { body } = await api(`/api/shipments?${params}`);
+      renderRows(body.shipments);
+      $('stat-total').textContent = body.stats.total;
+      $('stat-active').textContent = body.stats.active;
+      $('stat-delivered').textContent = body.stats.delivered;
+    }
+
+    $('status-filter').addEventListener('change', loadShipments);
+    $('search-input').addEventListener('input', loadShipments);
+
+    $('shipment-table').addEventListener('click', async (e) => {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      const id = btn.dataset.id;
+      let result;
+      if (btn.dataset.action === 'assign') {
+        const driverId = btn.closest('tr').querySelector('[data-testid="driver-select"]').value;
+        if (!driverId) return toast('Select a driver first', 'error');
+        result = await api(`/api/shipments/${id}/assign`, { method: 'POST', body: JSON.stringify({ driverId }) });
+        if (result.ok) toast(`Driver assigned to ${id}`);
+      } else if (btn.dataset.action === 'advance') {
+        result = await api(`/api/shipments/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: btn.dataset.next }) });
+        if (result.ok) toast(`${id} is now ${result.body.status}`);
+      } else if (btn.dataset.action === 'cancel') {
+        result = await api(`/api/shipments/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'Cancelled' }) });
+        if (result.ok) toast(`${id} cancelled`);
+      }
+      if (!result.ok) toast(result.body.error || 'Something went wrong', 'error');
+      await loadShipments();
+    });
+
+    $('submit-shipment').addEventListener('click', async () => {
+      const payload = {
+        customer: $('input-customer').value,
+        origin: $('input-origin').value,
+        destination: $('input-destination').value,
+        weightKg: $('input-weight').value,
+        priority: $('select-priority').value,
+      };
+      const { ok, body } = await api('/api/shipments', { method: 'POST', body: JSON.stringify(payload) });
+      const errorBox = $('form-error');
+      if (!ok) {
+        errorBox.innerHTML = (body.errors || ['Something went wrong']).map((m) => `<div>${esc(m)}</div>`).join('');
+        errorBox.hidden = false;
+        return;
+      }
+      errorBox.hidden = true;
+      ['input-customer', 'input-origin', 'input-destination', 'input-weight'].forEach((id) => ($(id).value = ''));
+      toast(`Shipment ${body.id} created`);
+      await loadShipments();
+    });
+
+    $('track-btn').addEventListener('click', async () => {
+      const id = $('track-input').value.trim();
+      $('track-error').hidden = true;
+      $('track-result').hidden = true;
+      if (!id) {
+        $('track-error').textContent = 'Enter a tracking number';
+        $('track-error').hidden = false;
+        return;
+      }
+      const { ok, body } = await api(`/api/shipments/${encodeURIComponent(id)}`);
+      if (!ok) {
+        $('track-error').textContent = 'Shipment not found';
+        $('track-error').hidden = false;
+        return;
+      }
+      $('track-id').textContent = body.id;
+      $('track-status').textContent = body.status;
+      $('track-route').textContent = `${body.origin} to ${body.destination}`;
+      $('track-timeline').innerHTML = body.history.map((h) => `<li data-testid="timeline-event">${esc(h.status)} - ${esc(h.note)}</li>`).join('');
+      $('track-result').hidden = false;
+    });
+
+    (async function init() {
+      const res = await api('/api/drivers');
+      drivers = res.body.drivers;
+      await loadShipments();
+    })();
+  </script>
+</body>
+</html>
